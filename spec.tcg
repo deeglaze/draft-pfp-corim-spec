@@ -1,5 +1,5 @@
 ---
-title: "Document Title"
+title: "CoRIM Profile for PCClient Platform Firmware"
 type: SPECIFICATION
 ...
 
@@ -42,10 +42,19 @@ owners.
 --------------------------------------------------------------------------------
 **Version** **Date**   **Description**
 ----------- ---------- ---------------------------------------------------------
-0.1         2024/01/29 Initial draft
+0.1         2024/10/22 Initial draft
 --------------------------------------------------------------------------------
 
-# Document Style
+# Scope
+
+The CoRIM Profile Specification for PC Client Platform Firmware, “this Specification”, describes the representation
+of reference values for event logs that are compliant with the PC Client Platform Firmware Profile, "PFP", Version 1.06
+Revision 52 or later. The scope of the specification includes the establishment of security domains
+for different events from the PFP for any number of events of certain kinds to appear in any order when appraising
+an event log from the PFP. This Specification describes what measured events are a matter of adherence to the PFP, and
+what measured events are permissible provided reference values from a trusted source. It is meant to give names to
+the open-ended spaces left by the PFP in order for providers of events in those spaces to provide fitting reference
+values.
 
 **Key Words**
 
