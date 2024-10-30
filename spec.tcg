@@ -91,6 +91,326 @@ Reach out to <admin@trustedcomputinggroup> with any questions about this documen
 
 ---
 
+# Introduction and Concepts
+
+::: Informative ::::
+The Trusted Computing Group's architecture is platform-independent, intended to enhance trust in computing platforms.
+As such, the TCG PC Client Platform Firmware Profile is general in specifying both hardware and software requirements.
+The goal of the TCG member companies is to provide a reasonable information model and example data model for providers of measured components to share signed claims of authenticity that have a shared meaning among Verifiers that appraise event logs.
+It is anticipated that this Profile will have companion profile documents that narrow and elaborate upon it as a baseline for different implementations of specific platforms.
+
+This document serves as reference documentation for architectural implementations of the PC Client firmware to specify a corresponding CoRIM profile for reference measurements.
+Specifically, this document defines:
+
+1. The names for event log regions where certain types of events may be measured in any order.
+2. A recommended representation for narrowing event log regions into sub-regions where extra constraints must be obeyed.
+3. A core language of constraints that a reasonable Verifier may evaluate to determine if a reference measurement applies to a region of the event log.
+4. Guidelines for leaving certain forms of appraisal to free-form policy.
+
+This specification is based on the TCG PC Client Platform Firmware Profile Version 1.06 Revision 52, "the PFP".
+The reader is expected to have an understanding of the concepts, defined functionality, and terms expressed in that document.
+This specification will attempt to minimize the duplication of information from that document.
+Concepts and terms defined and referenced in the PFP Specification will not be defined in this document.
+
+::::::::::::::::::::
+
+## CoRIM Profile Concepts
+
+The core concepts CoRIM builds upon are from the Remote ATtestation ProcedureS architecture specified in RFC9334.
+The TPM is an Attesting Environment that witnesses measurements of a Target Environment.
+The CoRIM data model provides a means of specifying an environment through concrete data representation.
+
+### Environment
+
+::: Informative ::::
+
+The CoRIM specification I-D.ietf-rats-wg.corim is based off the TCG Reference Integrity Manifest information model.
+CoRIM expands what is representable beyond firmware provenance to firmware, software, and more generally _environment_ measurements.
+
+The environment that the PFP measures is pre-`ExitBootServices`, "pre-EBS".
+The pre-EBS environment is composed of different components of different provenance than the core ROM.
+The different
+
+that are handed control
+Within pre-EBS there are streams of events measured into different PCR indices.
+The integrity of each stream is independent of each other.
+
+::::::::::::::::::::
+
+The `class`/`class-id` for the PFP events SHALL be TBD(TCG OID for pre-EBS events measured by TPM).
+The `class`/`layer` for a PFP event SHALL be the number of `EV_SEPARATOR` events measured to the PCR index prior to that event.
+The `instance-id` SHALL be the SHA256 digest of the `SubjectPublicKeyInfo` for the `AIK` certificate for the key that signed the quote with PCR values that prove the integrity of the event log.
+
+The environment for the PCClient PFP event log will be referred to as `env`.
+
+::: Informative ::::
+
+A reference value for an event is expressed with a `digests` `measurement-value-map` for each permissible PCR bank identified by algorithm.
+The `mkey` for reference measurements specifies which region of the log the measurement is deemed permissible for.
+
+::::::::::::::::::::
+
+### Measurement keys
+
+::: Informative ::::
+
+A measurement key identifies a "measured component" of a whole that an attester signs evidence for.
+The structure of a measurement key is by the profile, but they are all compared with CBOR-encoding binary equality.
+Generally, any events separated by an `EV_SEPARATOR` event are in different measured components, though components can be more granular.
+In order for reference measurements to be broadly applicable, it's better to not make too many case-specific measurement keys that an event log is separated amongst.
+
+Ordering requirements can be left to policy.
+
+::::::::::::::::::::
+
+The measurement key representation used by this profile is `uint` for the PCR index.
+
+::: Informative ::::
+
+Like PCRs, regions of different values are considered independent and unordered.
+To impose order, any "happens before" relationship is expressed as a "dependency happens before dependent" representation with Domains.
+A reference value provider (RVP) should only impose an ordering on its events when the ordering is security-relavent, and the ordering is not already required by the PFP.
+An RVP should not have to specify that the ordering of devices in the `BootOrder` variable must be the order that the PCR[4] events appear that track EFI application execution of the application configured in the contents of `BootOrder####` variables, as that is the PFP-specified policy.
+If however the execution of an EFI application measures its own TPM events, and their order is important, then the RVP may either encode ordering through domain dependencies or by informing policy-writers appraising events from the application of the expected ordering.
+
+::::::::::::::::::::
+
+### Domains
+
+::: Informative ::::
+
+A Domain is how the flat global namespace of Environments is organized into hierarchy.
+When a group of events must occur in a required order, but that group of events can be placed anywhere amongst other groups of events, then that group of events forms a domain that is a sibling to the other groups of events it can be reordered with.
+The organizing whole that determines that individual groups of events may occur in any order is their shair parent domain.
+
+::::::::::::::::::::
+
+Domains in this document use the `uint` type to ensure domain membership is understood as local to an individual appraisal session, and local to the TPM that justified the integrity of the event log(s).
+Each PFP environment SHALL be a member of the domain named by its layer.
+Each domain `n+1` SHALL be dependendent on domain `n`.
+
+
+::: Informative ::::
+
+Example:
+
+```
+&(dependency-triples: 4): [[1, [0]]]
+&(membership-triples: 5): [
+  [0, [ { &(class: 0): { &(class-id: 0): oid, &(layer: 3): 0 } } ]]
+  [1, [ { &(class: 0): { &(class-id: 0): oid, &(layer: 3): 1 } } ]]
+]
+```
+
+::::::::::::::::::::
+
+## PFP Concepts
+
+TODO: are there any?
+
+# TPM Evidence
+
+::: Informative ::::
+
+Whereas the TPM may be used to measure events after `ExitBootServices`, there may be no further extensions to PCRs 0-7.
+There may however be measurements to PCRs other than 0-7 pre-EBS.
+To account for event logging responsibility handoff from firmware to static Operating System, the evidence format that includes the PFP Event Log includes arbitrary other event logs that must also be replayed in sequence to reproduce the PCR bank values that are signed in the TPM quote.
+
+The following representation of a pair of event logs and signed quote verifying their integrity is one option an evidence collection agent may use to convey evidence to a Verifier.
+
+```
+evidence = [
+  event-logs: [ PCClientEL, * event-log ]
+  quote: full-quote
+]
+event-log = [
+  format: media-type,
+  payload: bstr
+]
+PCClientEL = bstr
+media-type = coap-format / content-type
+coap-format = 0..65535
+content-type = tstr
+
+full-quote = [
+  quote: bstr
+  pcrbank: bstr
+  signature: bstr
+  pubkey: COSE_key
+  hash_alg: alg-id
+  enc_alg: alg-id
+  sign_alg: alg-id
+]
+```
+
+::::::::::::::::::::
+
+Upon verifying integrity of the event logs against the TPM quote, the Verifier SHALL translate events to an internal representation that conforms to the CoRIM data model defined in this specification.
+
+An EFI application MAY emit an `EV_NO_ACTION` event with a `TCG_EventLogProfile_Event` to indicate to verifiers that, if supported, that EFI application's emitted event logs should be translated for appraisal following the provided profile.
+A profile name may be anything, but is recommended to be a UTF-8 encoded URI that is publicly reachable and includes documentation on how to interpret the profile.
+
+
+```C
+typedef struct tdTCG_EventLogProfile_Event {
+  BYTE Signature[16];
+  UINT16 ProfileNameSize;
+  BYTE ProfileName[ProfileNameSize];
+} TCG_EventLogProfile_Event;
+```
+
+Table: Definition of `TCG_EventLogProfile_Event`
+
++-----------------------+-----------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| Type                  | Name            | Description                                                                                                                                                                                    |
++=======================+=================+================================================================================================================================================================================================+
+| BYTE[16]              | Signature       | The NUL-terminated ASCII string "EventLogProfile" SHALL be set to {0x45, 0x76, 0x65, 0x6e, 0x74, 0x4c, 0x6f, 0x67, 0x50, 0x72, 0x6f, 0x66, 0x69, 0x6c, 0x65, 0x00}                             |
++-----------------------+-----------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| UINT16                | ProfileNameSize | Size in bytes of the ProfileName field. Must be nonzero                                                                                                                                        |
++-----------------------+-----------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| BYTE[ProfileNameSize] | ProfileName     | The name of the profile for interpreting the next string of events, delimited by either an EV_EFI_ACTION "Returning from EFI Application from Boot Option" or EV_EFI_BOOT_SERVICES_APPLICATION.|
++-----------------------+-----------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+
+# Informal author's notes
+
+
+Generally the order progresses from
+1. SRTM {EV_S_CRTM_CONTENTS, EV_S_CRTM_VERSION} Up to policy to require one or both.
+2. SecureBoot
+3. Drivers loaded and EFI applications executed.
+4. EBS
+5. post-Boot
+
+
+
+Events prior to the first `EV_SEPARATOR` for PCR `n` SHALL be members of `/ pfp-domain / { / pcr: / 0 => n, / order: / 0 }`.
+
+Policy comments:
+EV_NO_ACTION events are up to policy to accept or reject, though they can be required to get trust anchor information to the Verifier, such as with SPDM certificates.
+Events that have no trusted authority to corroborate them are up to policy to accept or not, e.g., SecureBoot on.
+
+The PFP dictates policy around events:
+Events that should exist but don't are for policy to decide.
+Events that exist and are corroborated but shouldn't are for policy to decide. Note "shouldn't" is strong requirement, as opposed to just extra measurements that don't hurt.
+
+PCR[0]:
+  0: SCRTM_VERSION
+  { out of spec, GCE adds GCENonHostInfo }
+  1: EV_SEPARATOR
+
+PCR[1]:
+  0: Boot order?
+     0: EV_EFI_VARIABLE_BOOT
+     12+: { boot order entry for each application that will run, e.g. shim, grub? Not sure why 2, 0, 1.. }
+  1: EV_SEPARATOR
+
+PCR[2]:
+  0: EV_SEPARATOR
+  1: drivers loaded? "hidden uefi application code"? device security events for SPDM?
+
+PFP suggests there should be an EV_SEPARATOR after the uefi application code to delineate the pre-OS and post-OS boundary.
+
+PCR[3]:
+  0: EV_SEPARATOR
+
+PCR[4]:
+  0: Handoff to EFI App? But before the EV_SEPARATOR events?
+  1: EV_SEPARATOR
+  2: EFI app measurement (the app that attempts to boot the OS)
+
+Any return transition to UEFI from an EFI application?
+
+PCR[5]:
+  0: EV_SEPARATOR
+  1: GPT measurement?
+  2: EBS call
+  3: EBS result
+
+Usable by any boot loader for variable data. (Why doesn't shim use it?)
+
+PCR[6]:
+  0: EV_SEPARATOR
+
+PCR[7]:
+  0: SecureBoot
+
+  0: EV_EFI_VARIABLE_DRIVER_CONFIG
+  1a..: {PK, KEK, DB, DBX, ? DT, ? DBR, ?! AuditMode + DeployedMode , ? Device security database }
+  2: ? Individual entries in the UEFI_IMAGE_SECURITY_DATABASE that are used to validate UEFI Drivers or UEFI Boot Applications in the boot path,
+     ? Individual entries in the EFI_DEVICE_SECURITY_DATABASE that are used to validate a SPDM device in the boot path.
+
+  1: EV_SEPARATOR
+  2: DB authorized EFI execution? SBAT? EFI_VARIABLE_AUTHORITY for Ubuntu?
+
+It is up to policy to accept or reject the UEFI Debug Mode event.
+
+PCR[8]:
+  0: grub runs?
+
+PCR[9]:
+  0: grub files?
+  1: grub config?
+  2: Linux?
+
+PCR[16]: NEVER EVER
+
+<!--
+Note to self about collection and recording of measurements.
+
+1. Platform Firmware MUST be designed to perform integrity measurements of the Host Platform’s pre-OS environment per this specification.
+2. Integrity collection and reporting MAY be available on the Host Platform upon delivery to the owner or MAY be made available to the owner using a method provided by the Host Platform Manufacturer.
+3. The Host Platform MAY provide a method for the owner or operator to prevent the platform from making measurements.
+   If the owner or operator indicates that the Host Platform is not to make measurements, then SRTM MUST disable the TPM as specified in Section 7.1 TPM Visibility to the OS.
+4. Unless TPM is hidden, integrity measurements made by the Platform Firmware that are extended MUST be extended into all allocated banks for a PCR, see Section 10.1 Introduction.
+5. Integrity measurements by Platform Firmware that are extended into PCR[0-7] MUST be done only while the Host Platform is in the Pre-OS environment after starting from an Off state.
+6. Integrity measurements of the pre-OS environment MUST NOT be extended to the PCRs allocated to the operating system.
+   Any Host Platform configuration change that occurs after the Host Platform transfers control to an operating system, or while resuming from other power states, is the purview of the operating system and measurements of those events are extended to the PCRs allocated to the operating system.
+   PCR[0-7] are exclusively for the use of platform firmware.
+   Operating system and OS present software should never use those PCRs.
+7. When the TPM is visible, Platform Firmware MUST log all measurements made to the TPM in the TCG Event Log.
+   See Section 10.1 Introduction:
+     a. Prior to Exit Boot Services and the call by the Operating System to get the Event TCG Event Log.
+     b. After the first call to get the Event Log from Platform Firmware, all measurements made by Platform firmware MUST be reported in the Event Log and in the EFI_TCG2_FINAL_EVENTS_TABLE, as defined in the TCG EFI Protocol Specification v1.0 revision 9 Section 7 (Log Entries after Get Event Log Service).
+8. When the TPM is hidden, Platform Firmware MUST cap PCR[0-7] as defined in Section 3.3.4 PCR Usage, but SHALL NOT log measurements in the TCG Event Log.
+   See Section 10.1 Introduction.
+9. Integrity measurements made by the platform manufacturer for PCR[6] MAY occur at any time (Pre-OS or Post-Boot).
+   See Section 3.3.4.7 PCR[6] – Host Platform Manufacturer Specific Measurements.
+10. When the TPM is visible, but independent of TPM state, Platform Firmware MUST measure EV_SEPARATOR as defined in Section 10.4.1 Event Types.
+    If the TPM is enabled, this event MUST be entered into both copies of the event log.
+    If the TPM is visible to the Operating System but the hierarchies are disabled, Platform Firmware MAY make other measurements as defined in this specification.
+11. While not all events described in Section 10.4.3 EV_ACTION Event Types are produced by every platform on every boot, when one is produced, platform Firmware MUST create the event indicated in Section 10.4.3 EV_ACTION Event Types.
+12. Platform firmware SHALL ensure the action of extending a measurement to a PCR and logging the associated event in the event log are atomic.
+    See Section 10.3 Measurement Event Entries and Log.
+
+Note, allow for error ?
+
+3.3.2.2 Errors Recording Measurements
+1. If the measurement of the SRTM, POST BIOS or Embedded UEFI Drivers cannot be made due to a failure of the Platform Firmware, the PCR’s MUST be capped by extending the digest of the value 00000001h to each PCR[0-7], and an EV_SEPARATOR event SHOULD be recorded in the event log for each PCR, per Section 10.4.1 Event Types.
+2. The SRTM SHOULD log the error event to the event log.
+3. If each PCR[0-7] cannot be capped, the Host Platform SHOULD take any necessary action to notify the Host Platform’s administrator, user, and operator and transition to a “fail-safe” mode by performing one of these actions:
+     a. Make the TPM interface inaccessible via hardware for the remainder of the power cycle;
+     b. Reboot the Host Platform;
+     c. Disable the Host Platform; OR
+     d. Perform a vendor-specific action that is equivalent to one of the options above
+
+Sequencing
+
+Sequence of measuring OS boot events MUST proceed as specified below.
+a. Upon selecting a boot device, the UEFI firmware measures the event type EV_EFI_ACTION “Calling EFI Application from Boot Option” into PCR[4] and measures the event type EV_EFI_ACTION “Booting to <Boot####> Option” where Boot#### is the Boot Option Variable Name.
+b. Measure EV_SEPARATOR into PCR[0-7]. This occurs only once in the flow.
+c. If UEFI Secure Boot is enabled, measure the entry in the UEFI_IMAGE_SECURITY_DATABASE_GUID/EFI_IMAGE_SECURITY_DATABASE that was used to validate the UEFI image into PCR[7] as described in section 3.3.4.8 PCR[7] – Secure Boot Policy Measurements steps 5 and 6.
+d. In this optional step, measure the GPT with event type EV_EFI_GPT_EVENT2 and event data set to the UEFI_GPT_DATA structure into PCR[5] or measure the GPT with event type EV_EFI_GPT_EVENT and event data set to the UEFI_GPT_DATA structure into PCR[5].
+e. Measure the selected UEFI application code PE/COFF image described by the boot variable with event type EV_EFI_BOOT_SERVICES_APPLICATION into PCR[4].
+f. Execute UEFI application from boot variable.
+i. In this optional step, if the executing code from step e loads additional applications or drivers prior to successive steps (i.e., return or exit boot services), the loaded applications or drivers MUST be measured into PCR[4].
+g. Measure EV_EFI_ACTION event “Returning from EFI Application from Boot Option” into PCR[4].
+h. If the firmware needs to select a next boot device, the UEFI firmware MUST jump to step a.
+i. If ExitBootServices() is invoked, then an EV_EFI_ACTION event “Exit Boot Services Invocation” MUST be measured.
+   The return value of ExitBootServices() MUST be reflected in a measured event, into PCR[5], as either “Exit Boot Services Returned with Failure” or “Exit Boot Services Returned with Success”, depending upon the return code from the ExitBootServices() call.
+
+
+-->
+
 # Checklist for users of this template
 
 * Ensure the repository is set to private
